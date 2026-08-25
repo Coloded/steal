@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026.08.25.6"
+VERSION="2026.08.25.7"
 REPO_BASE_URL="${CHECK_CPU_STEAL_REPO_BASE_URL:-https://raw.githubusercontent.com/Coloded/steal/main}"
+REPO_COMMIT_API_URL="${CHECK_CPU_STEAL_REPO_COMMIT_API_URL:-https://api.github.com/repos/Coloded/steal/commits/main}"
 lang="en"
 
 for arg in "$@"; do
@@ -89,15 +90,36 @@ file_version() {
   awk -F\" '/^VERSION=/ { print $2; exit }' "$file"
 }
 
+resolve_update_base_url() {
+  local tmp_meta sha
+
+  if [[ -n "${CHECK_CPU_STEAL_REPO_BASE_URL:-}" ]]; then
+    printf '%s\n' "$REPO_BASE_URL"
+    return
+  fi
+
+  tmp_meta="$(mktemp)"
+  download "$(with_cache_buster "$REPO_COMMIT_API_URL")" "$tmp_meta"
+  sha="$(awk -F\" '/"sha":/ { print $4; exit }' "$tmp_meta")"
+  rm -f "$tmp_meta"
+
+  if [[ -n "$sha" ]]; then
+    printf 'https://raw.githubusercontent.com/Coloded/steal/%s\n' "$sha"
+  else
+    printf '%s\n' "$REPO_BASE_URL"
+  fi
+}
+
 self_update() {
-  local tmp_script tmp_installer remote_version install_args=()
+  local tmp_script tmp_installer remote_version update_base_url install_args=()
 
   tmp_script="$(mktemp)"
   tmp_installer="$(mktemp)"
   trap 'rm -f "$tmp_script" "$tmp_installer"' EXIT
 
   say "Checking latest version on GitHub..." "Проверяю свежую версию на GitHub..."
-  download "$(with_cache_buster "${REPO_BASE_URL}/check_cpu_steal")" "$tmp_script"
+  update_base_url="$(resolve_update_base_url)"
+  download "$(with_cache_buster "${update_base_url}/check_cpu_steal")" "$tmp_script"
   remote_version="$(file_version "$tmp_script")"
 
   if [[ -z "$remote_version" ]]; then
@@ -112,7 +134,7 @@ self_update() {
 
   say "New version available: $VERSION -> $remote_version" "Доступна новая версия: $VERSION -> $remote_version"
   say "Downloading installer..." "Скачиваю installer..."
-  download "$(with_cache_buster "${REPO_BASE_URL}/install.sh")" "$tmp_installer"
+  download "$(with_cache_buster "${update_base_url}/install.sh")" "$tmp_installer"
 
   if [[ "$lang" == "ru" ]]; then
     install_args+=("-ru")
