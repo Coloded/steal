@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026.08.25.11"
+VERSION="2026.08.25.13"
 REPO_BASE_URL="${CHECK_CPU_STEAL_REPO_BASE_URL:-https://raw.githubusercontent.com/Coloded/steal/main}"
 REPO_COMMIT_API_URL="${CHECK_CPU_STEAL_REPO_COMMIT_API_URL:-https://api.github.com/repos/Coloded/steal/commits/main}"
 lang="en"
@@ -110,12 +110,26 @@ resolve_update_base_url() {
   fi
 }
 
+self_install_dir() {
+  local self="$0"
+
+  if [[ "$self" != */* ]]; then
+    self="$(command -v "$self" 2>/dev/null || printf '%s\n' "$self")"
+  fi
+
+  if [[ "$self" == */* ]]; then
+    cd "$(dirname "$self")" >/dev/null 2>&1 && pwd
+  else
+    printf '%s\n' "$HOME/.local/bin"
+  fi
+}
+
 self_update() {
-  local tmp_script tmp_installer remote_version update_base_url install_args=()
+  local tmp_script tmp_installer remote_version update_base_url install_dir
 
   tmp_script="$(mktemp)"
   tmp_installer="$(mktemp)"
-  trap 'rm -f "$tmp_script" "$tmp_installer"' EXIT
+  trap 'rm -f "${tmp_script:-}" "${tmp_installer:-}"' EXIT
 
   say "Checking latest version on GitHub..." "Проверяю свежую версию на GitHub..."
   update_base_url="$(resolve_update_base_url)"
@@ -136,12 +150,14 @@ self_update() {
   say "Downloading installer..." "Скачиваю installer..."
   download "$(with_cache_buster "${update_base_url}/install.sh")" "$tmp_installer"
 
-  if [[ "$lang" == "ru" ]]; then
-    install_args+=("-ru")
-  fi
-
   say "Running installer..." "Запускаю installer..."
-  bash "$tmp_installer" "${install_args[@]}"
+  install_dir="$(self_install_dir)"
+  say "Updating install directory: $install_dir" "Обновляю каталог установки: $install_dir"
+  if [[ "$lang" == "ru" ]]; then
+    INSTALL_DIR="$install_dir" bash "$tmp_installer" -ru
+  else
+    INSTALL_DIR="$install_dir" bash "$tmp_installer"
+  fi
 }
 
 target=""
