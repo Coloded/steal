@@ -13,6 +13,13 @@ curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | bas
 ```
 
 Если `/usr/local/bin` требует пароль, installer попросит `sudo`.
+Перед запросом пароля он объяснит зачем нужны права. Если ответить `n`,
+скрипт просто сохранится в текущую папку как `./check_cpu_steal`, и его
+можно будет запускать без установки:
+
+```bash
+./check_cpu_steal root@server.example.com
+```
 
 Установка в другой каталог:
 

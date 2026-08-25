@@ -5,6 +5,7 @@ REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/Coloded/steal/ma
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 BIN_NAME="${BIN_NAME:-check_cpu_steal}"
 TARGET="${INSTALL_DIR}/${BIN_NAME}"
+LOCAL_TARGET="${LOCAL_TARGET:-$(pwd)/${BIN_NAME}}"
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
 if [[ -n "$SCRIPT_PATH" && -f "$SCRIPT_PATH" ]]; then
@@ -32,6 +33,44 @@ download() {
   fi
 }
 
+install_local_file() {
+  local src="$1"
+
+  install -m 0755 "$src" "$LOCAL_TARGET"
+  TARGET="$LOCAL_TARGET"
+  echo "Sudo не использовался."
+  echo "Скрипт сохранен как обычный файл: $TARGET"
+  echo "Запуск:"
+  echo "$TARGET root@server"
+}
+
+ask_sudo_or_local() {
+  local reason="$1"
+  local answer=""
+
+  echo "$reason"
+  echo "Можно ввести пароль sudo и установить команду глобально: $TARGET"
+  echo "Можно не вводить пароль: тогда скрипт просто сохранится как файл: $LOCAL_TARGET"
+  if { exec 3</dev/tty; } 2>/dev/null; then
+    read -r -p "Использовать sudo для глобальной установки? [y/N]: " answer <&3 || answer=""
+    exec 3<&-
+  elif [[ -t 0 ]]; then
+    read -r -p "Использовать sudo для глобальной установки? [y/N]: " answer || answer=""
+  else
+    answer=""
+  fi
+
+  case "$answer" in
+    y|Y|yes|YES|Yes|д|Д|да|Да|ДА)
+      echo "Сейчас macOS/Linux спросит пароль вашего пользователя."
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 install_file() {
   local src="$1"
   local dst="$2"
@@ -40,29 +79,32 @@ install_file() {
     if mkdir -p "$INSTALL_DIR" 2>/dev/null; then
       :
     elif command -v sudo >/dev/null 2>&1; then
-      echo "Нужен sudo, чтобы создать каталог установки: $INSTALL_DIR"
-      echo "Сейчас macOS/Linux спросит пароль вашего пользователя."
-      echo "Без sudo можно установить так:"
-      echo "curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | INSTALL_DIR=\$HOME/.local/bin bash"
-      sudo mkdir -p "$INSTALL_DIR"
+      if ask_sudo_or_local "Нужен sudo, чтобы создать каталог установки: $INSTALL_DIR"; then
+        sudo mkdir -p "$INSTALL_DIR"
+      else
+        install_local_file "$src"
+        return
+      fi
     else
       echo "Не удалось создать $INSTALL_DIR и sudo не найден." >&2
-      exit 1
+      install_local_file "$src"
+      return
     fi
   fi
 
   if [[ -w "$INSTALL_DIR" ]]; then
     install -m 0755 "$src" "$dst"
   elif command -v sudo >/dev/null 2>&1; then
-    echo "Нужен sudo, чтобы установить команду в системный каталог: $dst"
-    echo "Сейчас macOS/Linux спросит пароль вашего пользователя."
-    echo "Без sudo можно установить так:"
-    echo "curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | INSTALL_DIR=\$HOME/.local/bin bash"
-    sudo install -m 0755 "$src" "$dst"
+    if ask_sudo_or_local "Нужен sudo, чтобы установить команду в системный каталог: $dst"; then
+      sudo install -m 0755 "$src" "$dst"
+    else
+      install_local_file "$src"
+      return
+    fi
   else
     echo "Нет прав на запись в $INSTALL_DIR и sudo не найден." >&2
-    echo "Можно указать другой каталог: INSTALL_DIR=\$HOME/.local/bin ./install.sh" >&2
-    exit 1
+    install_local_file "$src"
+    return
   fi
 }
 
