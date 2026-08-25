@@ -5,6 +5,11 @@ REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/Coloded/steal/ma
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 BIN_NAME="${BIN_NAME:-check_cpu_steal}"
 TARGET="${INSTALL_DIR}/${BIN_NAME}"
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+if [[ -n "$SCRIPT_PATH" && -f "$SCRIPT_PATH" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" >/dev/null 2>&1 && pwd)"
+fi
 
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -69,8 +74,8 @@ need_cmd awk
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
-if [[ -f "./check_cpu_steal" ]]; then
-  cp "./check_cpu_steal" "$tmp"
+if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/check_cpu_steal" ]]; then
+  cp "${SCRIPT_DIR}/check_cpu_steal" "$tmp"
 else
   download "$REPO_RAW_URL" "$tmp"
 fi
