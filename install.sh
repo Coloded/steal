@@ -2,10 +2,15 @@
 set -euo pipefail
 
 REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/Coloded/steal/main/check_cpu_steal}"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR_WAS_SET=0
+if [[ -n "${INSTALL_DIR+x}" ]]; then
+  INSTALL_DIR_WAS_SET=1
+fi
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BIN_NAME="${BIN_NAME:-check_cpu_steal}"
 TARGET="${INSTALL_DIR}/${BIN_NAME}"
 LOCAL_TARGET="${LOCAL_TARGET:-$(pwd)/${BIN_NAME}}"
+SUDO_USED=0
 lang="en"
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
@@ -53,6 +58,57 @@ say() {
   fi
 }
 
+read_answer() {
+  local prompt_en="$1"
+  local prompt_ru="$2"
+  local answer=""
+
+  if { exec 3</dev/tty; } 2>/dev/null; then
+    if [[ "$lang" == "ru" ]]; then
+      read -r -p "$prompt_ru" answer <&3 || answer=""
+    else
+      read -r -p "$prompt_en" answer <&3 || answer=""
+    fi
+    exec 3<&-
+  elif [[ -t 0 ]]; then
+    if [[ "$lang" == "ru" ]]; then
+      read -r -p "$prompt_ru" answer || answer=""
+    else
+      read -r -p "$prompt_en" answer || answer=""
+    fi
+  else
+    answer=""
+  fi
+
+  printf '%s\n' "$answer"
+}
+
+choose_install_scope() {
+  local answer=""
+
+  if (( INSTALL_DIR_WAS_SET )); then
+    TARGET="${INSTALL_DIR}/${BIN_NAME}"
+    return
+  fi
+
+  say "Install for all users? This installs to /usr/local/bin and may ask for sudo password." "Установить для всех пользователей? Это установка в /usr/local/bin и может спросить пароль sudo."
+  say "Press Enter for personal install without password: $HOME/.local/bin" "Нажмите Enter для установки только себе без пароля: $HOME/.local/bin"
+  answer="$(read_answer "Install for all users with sudo? [y/N]: " "Установить для всех пользователей с sudo? [y/N]: ")"
+
+  case "$answer" in
+    y|Y|yes|YES|Yes|д|Д|да|Да|ДА)
+      INSTALL_DIR="/usr/local/bin"
+      TARGET="${INSTALL_DIR}/${BIN_NAME}"
+      say "Selected: all users. macOS/Linux may ask for your password." "Выбрано: для всех пользователей. macOS/Linux может спросить пароль."
+      ;;
+    *)
+      INSTALL_DIR="$HOME/.local/bin"
+      TARGET="${INSTALL_DIR}/${BIN_NAME}"
+      say "Selected: personal install, no sudo." "Выбрано: установка только себе, без sudo."
+      ;;
+  esac
+}
+
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     say "Missing command: $1" "Не найдена команда: $1" >&2
@@ -74,86 +130,68 @@ download() {
   fi
 }
 
-install_local_file() {
-  local src="$1"
-
-  install -m 0755 "$src" "$LOCAL_TARGET"
-  TARGET="$LOCAL_TARGET"
-  say "Sudo was not used." "Sudo не использовался."
-  say "The script was saved as a regular file: $TARGET" "Скрипт сохранен как обычный файл: $TARGET"
-  say "Run it with:" "Запуск:"
-  echo "$TARGET root@server"
-}
-
-ask_sudo_or_local() {
-  local reason="$1"
-  local answer=""
-
-  echo "$reason"
-  say "You can enter your sudo password and install the command globally: $TARGET" "Можно ввести пароль sudo и установить команду глобально: $TARGET"
-  say "Or skip sudo: the script will be saved as a regular file: $LOCAL_TARGET" "Можно не вводить пароль: тогда скрипт просто сохранится как файл: $LOCAL_TARGET"
-  if { exec 3</dev/tty; } 2>/dev/null; then
-    if [[ "$lang" == "ru" ]]; then
-      read -r -p "Использовать sudo для глобальной установки? [y/N]: " answer <&3 || answer=""
-    else
-      read -r -p "Use sudo for global install? [y/N]: " answer <&3 || answer=""
-    fi
-    exec 3<&-
-  elif [[ -t 0 ]]; then
-    if [[ "$lang" == "ru" ]]; then
-      read -r -p "Использовать sudo для глобальной установки? [y/N]: " answer || answer=""
-    else
-      read -r -p "Use sudo for global install? [y/N]: " answer || answer=""
-    fi
-  else
-    answer=""
-  fi
-
-  case "$answer" in
-    y|Y|yes|YES|Yes|д|Д|да|Да|ДА)
-      say "macOS/Linux will now ask for your user password." "Сейчас macOS/Linux спросит пароль вашего пользователя."
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 install_file() {
   local src="$1"
   local dst="$2"
 
   if [[ ! -d "$INSTALL_DIR" ]]; then
-    if mkdir -p "$INSTALL_DIR" 2>/dev/null; then
-      :
-    elif command -v sudo >/dev/null 2>&1; then
-      if ask_sudo_or_local "$(say "sudo is needed to create install directory: $INSTALL_DIR" "Нужен sudo, чтобы создать каталог установки: $INSTALL_DIR")"; then
+    if ! mkdir -p "$INSTALL_DIR" 2>/dev/null; then
+      if command -v sudo >/dev/null 2>&1; then
+        say "sudo is needed to create install directory: $INSTALL_DIR" "Нужен sudo, чтобы создать каталог установки: $INSTALL_DIR"
+        SUDO_USED=1
         sudo mkdir -p "$INSTALL_DIR"
       else
-        install_local_file "$src"
-        return
+        say "Could not create install directory and sudo was not found: $INSTALL_DIR" "Не удалось создать каталог установки и sudo не найден: $INSTALL_DIR" >&2
+        exit 1
       fi
-    else
-      say "Could not create $INSTALL_DIR and sudo was not found." "Не удалось создать $INSTALL_DIR и sudo не найден." >&2
-      install_local_file "$src"
-      return
     fi
   fi
 
   if [[ -w "$INSTALL_DIR" ]]; then
     install -m 0755 "$src" "$dst"
-  elif command -v sudo >/dev/null 2>&1; then
-    if ask_sudo_or_local "$(say "sudo is needed to install the command into the system directory: $dst" "Нужен sudo, чтобы установить команду в системный каталог: $dst")"; then
+  else
+    if command -v sudo >/dev/null 2>&1; then
+      say "sudo is needed to install into: $dst" "Нужен sudo, чтобы установить в: $dst"
+      SUDO_USED=1
       sudo install -m 0755 "$src" "$dst"
     else
-      install_local_file "$src"
-      return
+      say "No write permission and sudo was not found: $INSTALL_DIR" "Нет прав на запись и sudo не найден: $INSTALL_DIR" >&2
+      exit 1
     fi
-  else
-    say "No write permission for $INSTALL_DIR and sudo was not found." "Нет прав на запись в $INSTALL_DIR и sudo не найден." >&2
-    install_local_file "$src"
+  fi
+}
+
+path_contains_install_dir() {
+  case ":$PATH:" in
+    *":$INSTALL_DIR:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+print_path_hint() {
+  if path_contains_install_dir; then
     return
+  fi
+
+  say "Note: $INSTALL_DIR is not in PATH yet." "Важно: $INSTALL_DIR пока не в PATH."
+  say "Add this line to your shell profile, then reopen the terminal:" "Добавьте эту строку в профиль shell, потом откройте терминал заново:"
+  if [[ "$INSTALL_DIR" == "$HOME/.local/bin" ]]; then
+    echo "export PATH=\"\$HOME/.local/bin:\$PATH\""
+  else
+    echo "export PATH=\"$INSTALL_DIR:\$PATH\""
+  fi
+}
+
+print_shadow_hint() {
+  local resolved=""
+
+  if command -v "$BIN_NAME" >/dev/null 2>&1; then
+    resolved="$(command -v "$BIN_NAME")"
+  fi
+
+  if [[ -n "$resolved" && "$resolved" != "$TARGET" ]]; then
+    say "Note: your shell currently finds another copy first: $resolved" "Важно: shell сейчас первым находит другую копию: $resolved"
+    say "Put $INSTALL_DIR earlier in PATH or remove the older copy." "Поставьте $INSTALL_DIR раньше в PATH или удалите старую копию."
   fi
 }
 
@@ -170,6 +208,8 @@ need_cmd install
 need_cmd ssh
 need_cmd awk
 
+choose_install_scope
+
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
@@ -182,6 +222,11 @@ fi
 install_file "$tmp" "$TARGET"
 
 say "Installed: $TARGET" "Установлено: $TARGET"
+if (( SUDO_USED == 0 )); then
+  say "No sudo was used." "Sudo не использовался."
+fi
+print_path_hint
+print_shadow_hint
 say "Check:" "Проверка:"
 if [[ "$lang" == "ru" ]]; then
   "$TARGET" -ru --help

@@ -12,13 +12,21 @@ Debian/Ubuntu/Linux and macOS:
 curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | bash
 ```
 
-If `/usr/local/bin` needs elevated permissions, the installer explains why before asking for `sudo`. If you answer `n`, it will not ask for a password and will save `./check_cpu_steal` into the current directory instead:
+The installer asks where to install:
 
-```bash
-./check_cpu_steal root@server.example.com
+```text
+Install for all users with sudo? [y/N]:
 ```
 
-Install without sudo into another directory:
+Press Enter or answer `n` for a personal install without password:
+
+```text
+~/.local/bin/check_cpu_steal
+```
+
+Answer `y` to install for all users into `/usr/local/bin`; that path may ask for your sudo password. If `~/.local/bin` is not in `PATH`, the installer prints the line to add to your shell profile.
+
+Install into another user-writable directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | INSTALL_DIR="$HOME/.local/bin" bash
