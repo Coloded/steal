@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026.08.25.5"
+VERSION="2026.08.25.6"
 REPO_BASE_URL="${CHECK_CPU_STEAL_REPO_BASE_URL:-https://raw.githubusercontent.com/Coloded/steal/main}"
 lang="en"
 
@@ -72,6 +72,18 @@ download() {
   fi
 }
 
+with_cache_buster() {
+  local url="$1"
+  case "$url" in
+    http://*|https://*)
+      printf '%s?ts=%s\n' "$url" "$(date +%s)"
+      ;;
+    *)
+      printf '%s\n' "$url"
+      ;;
+  esac
+}
+
 file_version() {
   local file="$1"
   awk -F\" '/^VERSION=/ { print $2; exit }' "$file"
@@ -85,7 +97,7 @@ self_update() {
   trap 'rm -f "$tmp_script" "$tmp_installer"' EXIT
 
   say "Checking latest version on GitHub..." "Проверяю свежую версию на GitHub..."
-  download "${REPO_BASE_URL}/check_cpu_steal" "$tmp_script"
+  download "$(with_cache_buster "${REPO_BASE_URL}/check_cpu_steal")" "$tmp_script"
   remote_version="$(file_version "$tmp_script")"
 
   if [[ -z "$remote_version" ]]; then
@@ -100,7 +112,7 @@ self_update() {
 
   say "New version available: $VERSION -> $remote_version" "Доступна новая версия: $VERSION -> $remote_version"
   say "Downloading installer..." "Скачиваю installer..."
-  download "${REPO_BASE_URL}/install.sh" "$tmp_installer"
+  download "$(with_cache_buster "${REPO_BASE_URL}/install.sh")" "$tmp_installer"
 
   if [[ "$lang" == "ru" ]]; then
     install_args+=("-ru")
