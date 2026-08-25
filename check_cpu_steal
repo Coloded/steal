@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026.08.25.9"
+VERSION="2026.08.25.10"
 REPO_BASE_URL="${CHECK_CPU_STEAL_REPO_BASE_URL:-https://raw.githubusercontent.com/Coloded/steal/main}"
 REPO_COMMIT_API_URL="${CHECK_CPU_STEAL_REPO_COMMIT_API_URL:-https://api.github.com/repos/Coloded/steal/commits/main}"
 lang="en"
