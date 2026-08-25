@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+lang="en"
+
+for arg in "$@"; do
+  case "$arg" in
+    -ru|--ru)
+      lang="ru"
+      break
+      ;;
+  esac
+done
+
 usage() {
-  cat <<'EOF'
-Usage:
-  check_cpu_steal [user@]host [-p port] [-s seconds] [--stress|--no-stress|--stress-auto]
+  if [[ "$lang" == "ru" ]]; then
+    cat <<'EOF'
+Использование:
+  check_cpu_steal [user@]host [-p port] [-s seconds] [--stress|--no-stress|--stress-auto] [-ru]
 
 Если host не указан, скрипт спросит его интерактивно.
 Авторизация работает как обычный ssh: ключи, ssh-agent, ~/.ssh/config,
@@ -14,6 +26,20 @@ Usage:
 скрипт запустит CPU-нагрузку на все найденные vCPU, измерит steal
 и остановит нагрузку перед выходом.
 EOF
+  else
+    cat <<'EOF'
+Usage:
+  check_cpu_steal [user@]host [-p port] [-s seconds] [--stress|--no-stress|--stress-auto] [-ru]
+
+If host is not provided, the script asks for it interactively.
+SSH auth works exactly like normal ssh: keys, ssh-agent, ~/.ssh/config,
+and password prompt if the server allows password login.
+
+By default --stress-auto is enabled: if CPU idle is above 50%, the script
+starts CPU load on all detected vCPUs, measures steal, and stops the load
+before exit.
+EOF
+  fi
 }
 
 target=""
@@ -23,6 +49,10 @@ stress_mode="auto"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -ru|--ru)
+      lang="ru"
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -54,7 +84,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       if [[ -n "$target" ]]; then
-        echo "Only one host can be checked at a time." >&2
+        if [[ "$lang" == "ru" ]]; then
+          echo "Можно проверить только один host за раз." >&2
+        else
+          echo "Only one host can be checked at a time." >&2
+        fi
         exit 2
       fi
       target="$1"
@@ -64,11 +98,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$target" ]]; then
-  read -r -p "Имя сервера или IP (можно user@host): " target
+  if [[ "$lang" == "ru" ]]; then
+    read -r -p "Имя сервера или IP (можно user@host): " target
+  else
+    read -r -p "Server name or IP (user@host also works): " target
+  fi
 fi
 
 if [[ -z "$target" ]]; then
-  echo "Сервер не указан." >&2
+  if [[ "$lang" == "ru" ]]; then
+    echo "Сервер не указан." >&2
+  else
+    echo "No server specified." >&2
+  fi
   exit 2
 fi
 
@@ -77,7 +119,11 @@ if [[ -z "$seconds" ]]; then
 fi
 
 if ! [[ "$seconds" =~ ^[0-9]+$ ]] || [[ "$seconds" -lt 2 ]]; then
-  echo "Время замера должно быть целым числом >= 2." >&2
+  if [[ "$lang" == "ru" ]]; then
+    echo "Время замера должно быть целым числом >= 2." >&2
+  else
+    echo "Measurement time must be an integer >= 2." >&2
+  fi
   exit 2
 fi
 
@@ -86,19 +132,35 @@ if [[ -n "$port" ]]; then
   ssh_args+=("-p" "$port")
 fi
 
-echo "Подключаюсь к $target..."
-echo "Меряю CPU steal ${seconds}s..."
+if [[ "$lang" == "ru" ]]; then
+  echo "Подключаюсь к $target..."
+  echo "Меряю CPU steal ${seconds}s..."
+else
+  echo "Connecting to $target..."
+  echo "Measuring CPU steal for ${seconds}s..."
+fi
 echo
 
-ssh "${ssh_args[@]}" "$target" 'bash -s' -- "$seconds" "$stress_mode" <<'REMOTE'
+ssh "${ssh_args[@]}" "$target" 'bash -s' -- "$seconds" "$stress_mode" "$lang" <<'REMOTE'
 set -euo pipefail
 
 seconds="$1"
 stress_mode="$2"
+lang="$3"
 stress_pids=()
 
+say() {
+  local en="$1"
+  local ru="$2"
+  if [[ "$lang" == "ru" ]]; then
+    echo "$ru"
+  else
+    echo "$en"
+  fi
+}
+
 if [[ ! -r /proc/stat ]]; then
-  echo "Для проверки нужен Linux /proc/stat. На удаленной ОС его нет." >&2
+  say "This check needs Linux /proc/stat. The remote OS does not expose it." "Для проверки нужен Linux /proc/stat. На удаленной ОС его нет." >&2
   exit 1
 fi
 
@@ -128,24 +190,46 @@ format_pct() {
 
 interpret() {
   local x100="$1"
-  if (( x100 < 100 )); then
-    echo "Excellent: все отлично, CPU steal почти нет (нормально)."
-  elif (( x100 < 300 )); then
-    echo "Good: все хорошо, CPU steal низкий (так себе только если повторяется в пиках)."
-  elif (( x100 < 500 )); then
-    echo "OK: до 5%, жить можно, но стоит иногда перепроверять (заметно плохо еще не видно)."
-  elif (( x100 < 1000 )); then
-    echo "Bad: заметный CPU contention / вероятный оверселл (плохо)."
-  elif (( x100 < 2000 )); then
-    echo "Very bad: VM регулярно не получает CPU (очень плохо)."
-  elif (( x100 < 3000 )); then
-    echo "Terrible: сильная деградация производительности (ужасно)."
-  elif (( x100 < 5000 )); then
-    echo "Critical: хост-нода сильно перегружена (сервер душат)."
-  elif (( x100 < 7000 )); then
-    echo "Severe: VM большую часть времени CPU-starved (почти неработоспособно)."
+  if [[ "$lang" == "ru" ]]; then
+    if (( x100 < 100 )); then
+      echo "Excellent: все отлично, CPU steal почти нет (нормально)."
+    elif (( x100 < 300 )); then
+      echo "Good: все хорошо, CPU steal низкий (так себе только если повторяется в пиках)."
+    elif (( x100 < 500 )); then
+      echo "OK: до 5%, жить можно, но стоит иногда перепроверять (заметно плохо еще не видно)."
+    elif (( x100 < 1000 )); then
+      echo "Bad: заметный CPU contention / вероятный оверселл (плохо)."
+    elif (( x100 < 2000 )); then
+      echo "Very bad: VM регулярно не получает CPU (очень плохо)."
+    elif (( x100 < 3000 )); then
+      echo "Terrible: сильная деградация производительности (ужасно)."
+    elif (( x100 < 5000 )); then
+      echo "Critical: хост-нода сильно перегружена (сервер душат)."
+    elif (( x100 < 7000 )); then
+      echo "Severe: VM большую часть времени CPU-starved (почти неработоспособно)."
+    else
+      echo "Unusable: нормально работать почти невозможно (все пропало)."
+    fi
   else
-    echo "Unusable: нормально работать почти невозможно (все пропало)."
+    if (( x100 < 100 )); then
+      echo "Excellent: everything looks great, CPU steal is almost zero (normal)."
+    elif (( x100 < 300 )); then
+      echo "Good: CPU steal is low (only worth watching if it repeats at peak time)."
+    elif (( x100 < 500 )); then
+      echo "OK: below 5%, usable, but worth checking again sometimes."
+    elif (( x100 < 1000 )); then
+      echo "Bad: noticeable CPU contention / likely overselling (bad)."
+    elif (( x100 < 2000 )); then
+      echo "Very bad: the VM regularly does not receive CPU time (very bad)."
+    elif (( x100 < 3000 )); then
+      echo "Terrible: serious performance degradation (terrible)."
+    elif (( x100 < 5000 )); then
+      echo "Critical: the host node is heavily overloaded (the server is being throttled)."
+    elif (( x100 < 7000 )); then
+      echo "Severe: the VM is CPU-starved most of the time (almost unusable)."
+    else
+      echo "Unusable: normal work is almost impossible (everything is bad)."
+    fi
   fi
 }
 
@@ -181,7 +265,7 @@ start_cpu_load() {
   local workers="$1"
   local i
 
-  echo "Нагрузка: запускаю генератор случайных чисел на ${workers} vCPU..."
+  say "Load: starting random-number CPU generator on ${workers} vCPU..." "Нагрузка: запускаю генератор случайных чисел на ${workers} vCPU..."
   for ((i = 1; i <= workers; i++)); do
     awk 'BEGIN { srand(); while (1) { x = rand(); y = x * rand(); } }' >/dev/null &
     stress_pids+=("$!")
@@ -223,21 +307,25 @@ case "$stress_mode" in
   auto)
     idle_x100="$(cpu_idle_x100)"
     busy_x100=$((10000 - idle_x100))
-    echo "CPU сейчас: занято $(format_pct "$busy_x100"), простой $(format_pct "$idle_x100")."
+    if [[ "$lang" == "ru" ]]; then
+      echo "CPU сейчас: занято $(format_pct "$busy_x100"), простой $(format_pct "$idle_x100")."
+    else
+      echo "CPU now: busy $(format_pct "$busy_x100"), idle $(format_pct "$idle_x100")."
+    fi
     if (( idle_x100 > 5000 )); then
-      echo "Простоя больше 50%: включаю stress auto."
+      say "Idle is above 50%: enabling stress auto." "Простоя больше 50%: включаю stress auto."
       start_cpu_load "$cores"
     else
-      echo "Простоя 50% или меньше: нагрузка уже есть, дополнительный stress не запускаю."
+      say "Idle is 50% or lower: load already exists, not starting extra stress." "Простоя 50% или меньше: нагрузка уже есть, дополнительный stress не запускаю."
     fi
     echo
     ;;
   no)
-    echo "Нагрузка: выключена (--no-stress)."
+    say "Load: disabled (--no-stress)." "Нагрузка: выключена (--no-stress)."
     echo
     ;;
   *)
-    echo "Неизвестный режим stress: $stress_mode" >&2
+    say "Unknown stress mode: $stress_mode" "Неизвестный режим stress: $stress_mode" >&2
     exit 2
     ;;
 esac
@@ -268,21 +356,27 @@ for ((i = 1; i <= seconds; i++)); do
 done
 
 if (( count == 0 )); then
-  echo "Не удалось собрать CPU samples." >&2
+  say "Could not collect CPU samples." "Не удалось собрать CPU samples." >&2
   exit 1
 fi
 
 avg_x100=$(((sum_x100 + count / 2) / count))
 
-echo "CPU steal средний: $(format_pct "$avg_x100")"
-echo "CPU steal макс 1s: $(format_pct "$max_x100")"
-echo "Замеров: ${count}s"
+if [[ "$lang" == "ru" ]]; then
+  echo "CPU steal средний: $(format_pct "$avg_x100")"
+  echo "CPU steal макс 1s: $(format_pct "$max_x100")"
+  echo "Замеров: ${count}s"
+else
+  echo "CPU steal average: $(format_pct "$avg_x100")"
+  echo "CPU steal max 1s: $(format_pct "$max_x100")"
+  echo "Samples: ${count}s"
+fi
 echo
 interpret "$avg_x100"
 echo
 if (( ${#stress_pids[@]} > 0 )); then
-  echo "Нагрузка остановлена. Если steal высокий под такой нагрузкой, это хороший признак CPU contention/оверселла."
+  say "Load stopped. High steal under this load is a strong sign of CPU contention/overselling." "Нагрузка остановлена. Если steal высокий под такой нагрузкой, это хороший признак CPU contention/оверселла."
 else
-  echo "Совет: для чистого теста под нагрузкой используйте --stress, если auto-режим не включил нагрузку."
+  say "Tip: use --stress for a clean under-load test if auto mode did not start load." "Совет: для чистого теста под нагрузкой используйте --stress, если auto-режим не включил нагрузку."
 fi
 REMOTE

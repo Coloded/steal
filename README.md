@@ -1,53 +1,67 @@
 # steal
 
-`check_cpu_steal` проверяет CPU steal на Linux VDS/VPS через SSH. Это помогает понять, не душит ли виртуалку перегруженная хост-нода или оверселл.
+`check_cpu_steal` checks Linux VDS/VPS CPU steal over SSH. It helps detect whether a VM is being slowed down by host-node CPU contention or overselling.
 
-Скрипт использует обычный `ssh`: ключи, `ssh-agent`, `~/.ssh/config` и парольный вход работают так же, как при ручном подключении.
+The script uses normal `ssh`: keys, `ssh-agent`, `~/.ssh/config`, and password login work the same way as with manual SSH.
 
-## Установка
+## Install
 
-Linux Debian/Ubuntu и macOS:
+Debian/Ubuntu/Linux and macOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | bash
 ```
 
-Если `/usr/local/bin` требует пароль, installer попросит `sudo`.
-Перед запросом пароля он объяснит зачем нужны права. Если ответить `n`,
-скрипт просто сохранится в текущую папку как `./check_cpu_steal`, и его
-можно будет запускать без установки:
+If `/usr/local/bin` needs elevated permissions, the installer explains why before asking for `sudo`. If you answer `n`, it will not ask for a password and will save `./check_cpu_steal` into the current directory instead:
 
 ```bash
 ./check_cpu_steal root@server.example.com
 ```
 
-Установка в другой каталог:
+Install without sudo into another directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
-## Использование
+Russian installer output:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | bash -s -- -ru
+```
+
+## Usage
 
 ```bash
 check_cpu_steal root@1.2.3.4
 check_cpu_steal root@server.example.com -p 2222 -s 60
 check_cpu_steal root@server.example.com --stress
 check_cpu_steal root@server.example.com --no-stress
+check_cpu_steal root@server.example.com -ru
 ```
 
-По умолчанию включен `--stress-auto`: если CPU простаивает больше 50%, скрипт запускает генератор случайных чисел на все найденные vCPU, измеряет steal и останавливает нагрузку перед выходом.
+By default `--stress-auto` is enabled: if CPU idle is above 50%, the script starts a random-number CPU generator on all detected vCPUs, measures steal, and stops the load before exit.
 
-## Градации
+Use `-ru` or `--ru` for Russian output.
+
+## Grades
 
 ```text
-<1%      Excellent: все отлично
-1-3%     Good: все хорошо
-3-5%     OK: до 5%, жить можно
-5-10%    Bad: заметный CPU contention / вероятный оверселл (плохо)
-10-20%   Very bad: VM регулярно не получает CPU (очень плохо)
-20-30%   Terrible: сильная деградация производительности (ужасно)
-30-50%   Critical: хост-нода сильно перегружена (сервер душат)
-50-70%   Severe: VM большую часть времени CPU-starved (почти неработоспособно)
-70%+     Unusable: нормально работать почти невозможно (все пропало)
+<1%      Excellent: everything looks great
+1-3%     Good: CPU steal is low
+3-5%     OK: below 5%, usable
+5-10%    Bad: noticeable CPU contention / likely overselling (bad)
+10-20%   Very bad: the VM regularly does not receive CPU time (very bad)
+20-30%   Terrible: serious performance degradation (terrible)
+30-50%   Critical: the host node is heavily overloaded (the server is being throttled)
+50-70%   Severe: the VM is CPU-starved most of the time (almost unusable)
+70%+     Unusable: normal work is almost impossible (everything is bad)
 ```
+
+## Russian
+
+```bash
+check_cpu_steal root@server.example.com -ru
+```
+
+With `-ru`, all `check_cpu_steal` output is in Russian.
