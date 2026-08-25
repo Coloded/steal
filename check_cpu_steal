@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERSION="2026.08.25.5"
+REPO_BASE_URL="${CHECK_CPU_STEAL_REPO_BASE_URL:-https://raw.githubusercontent.com/Coloded/steal/main}"
 lang="en"
 
 for arg in "$@"; do
@@ -17,6 +19,8 @@ usage() {
     cat <<'EOF'
 Использование:
   check_cpu_steal [user@]host [-p port] [-s seconds] [--stress|--no-stress|--stress-auto] [-ru]
+  check_cpu_steal --update [-ru]
+  check_cpu_steal --version
 
 Если host не указан, скрипт спросит его интерактивно.
 Авторизация работает как обычный ssh: ключи, ssh-agent, ~/.ssh/config,
@@ -30,6 +34,8 @@ EOF
     cat <<'EOF'
 Usage:
   check_cpu_steal [user@]host [-p port] [-s seconds] [--stress|--no-stress|--stress-auto] [-ru]
+  check_cpu_steal --update [-ru]
+  check_cpu_steal --version
 
 If host is not provided, the script asks for it interactively.
 SSH auth works exactly like normal ssh: keys, ssh-agent, ~/.ssh/config,
@@ -40,6 +46,68 @@ starts CPU load on all detected vCPUs, measures steal, and stops the load
 before exit.
 EOF
   fi
+}
+
+say() {
+  local en="$1"
+  local ru="$2"
+  if [[ "$lang" == "ru" ]]; then
+    echo "$ru"
+  else
+    echo "$en"
+  fi
+}
+
+download() {
+  local url="$1"
+  local dest="$2"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$dest"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$dest" "$url"
+  else
+    say "curl or wget is required for update." "Для обновления нужен curl или wget." >&2
+    exit 1
+  fi
+}
+
+file_version() {
+  local file="$1"
+  awk -F\" '/^VERSION=/ { print $2; exit }' "$file"
+}
+
+self_update() {
+  local tmp_script tmp_installer remote_version install_args=()
+
+  tmp_script="$(mktemp)"
+  tmp_installer="$(mktemp)"
+  trap 'rm -f "$tmp_script" "$tmp_installer"' EXIT
+
+  say "Checking latest version on GitHub..." "Проверяю свежую версию на GitHub..."
+  download "${REPO_BASE_URL}/check_cpu_steal" "$tmp_script"
+  remote_version="$(file_version "$tmp_script")"
+
+  if [[ -z "$remote_version" ]]; then
+    say "Could not detect remote version." "Не удалось определить версию на GitHub." >&2
+    exit 1
+  fi
+
+  if [[ "$remote_version" == "$VERSION" ]]; then
+    say "Already latest: $VERSION" "У вас уже последняя версия: $VERSION"
+    exit 0
+  fi
+
+  say "New version available: $VERSION -> $remote_version" "Доступна новая версия: $VERSION -> $remote_version"
+  say "Downloading installer..." "Скачиваю installer..."
+  download "${REPO_BASE_URL}/install.sh" "$tmp_installer"
+
+  if [[ "$lang" == "ru" ]]; then
+    install_args+=("-ru")
+  fi
+
+  say "Running installer..." "Запускаю installer..."
+  bash "$tmp_installer" "${install_args[@]}"
 }
 
 target=""
@@ -55,6 +123,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       usage
+      exit 0
+      ;;
+    --version)
+      echo "$VERSION"
+      exit 0
+      ;;
+    --update|-update)
+      self_update
       exit 0
       ;;
     -p|--port)

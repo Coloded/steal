@@ -38,11 +38,21 @@ check_cpu_steal root@server.example.com -p 2222 -s 60
 check_cpu_steal root@server.example.com --stress
 check_cpu_steal root@server.example.com --no-stress
 check_cpu_steal root@server.example.com -ru
+check_cpu_steal --version
+check_cpu_steal --update
 ```
 
 By default `--stress-auto` is enabled: if CPU idle is above 50%, the script starts a random-number CPU generator on all detected vCPUs, measures steal, and stops the load before exit.
 
 Use `-ru` or `--ru` for Russian output.
+
+## Update
+
+```bash
+check_cpu_steal --update
+```
+
+The update command downloads the latest script from GitHub, compares versions, and runs the installer only when a newer version is available. If you already have the latest version, it says so and exits.
 
 ## Grades
 
@@ -62,6 +72,7 @@ Use `-ru` or `--ru` for Russian output.
 
 ```bash
 check_cpu_steal root@server.example.com -ru
+check_cpu_steal --update -ru
 ```
 
 With `-ru`, all `check_cpu_steal` output is in Russian.
