@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  check_cpu_steal [user@]host [-p port] [-s seconds] [--stress|--no-stress|--stress-auto]
+
+Если host не указан, скрипт спросит его интерактивно.
+Авторизация работает как обычный ssh: ключи, ssh-agent, ~/.ssh/config,
+и запрос пароля, если сервер разрешает вход по паролю.
+
+По умолчанию включен --stress-auto: если CPU простаивает больше 50%,
+скрипт запустит CPU-нагрузку на все найденные vCPU, измерит steal
+и остановит нагрузку перед выходом.
+EOF
+}
+
+target=""
+port="22"
+seconds="15"
+stress_mode="auto"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -p|--port)
+      port="${2:-}"
+      shift 2
+      ;;
+    -s|--seconds)
+      seconds="${2:-}"
+      shift 2
+      ;;
+    --stress)
+      stress_mode="yes"
+      shift
+      ;;
+    --no-stress)
+      stress_mode="no"
+      shift
+      ;;
+    --stress-auto)
+      stress_mode="auto"
+      shift
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      if [[ -n "$target" ]]; then
+        echo "Only one host can be checked at a time." >&2
+        exit 2
+      fi
+      target="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$target" ]]; then
+  read -r -p "Имя сервера или IP (можно user@host): " target
+fi
+
+if [[ -z "$target" ]]; then
+  echo "Сервер не указан." >&2
+  exit 2
+fi
+
+if [[ -z "$seconds" ]]; then
+  seconds="15"
+fi
+
+if ! [[ "$seconds" =~ ^[0-9]+$ ]] || [[ "$seconds" -lt 2 ]]; then
+  echo "Время замера должно быть целым числом >= 2." >&2
+  exit 2
+fi
+
+ssh_args=()
+if [[ -n "$port" ]]; then
+  ssh_args+=("-p" "$port")
+fi
+
+echo "Подключаюсь к $target..."
+echo "Меряю CPU steal ${seconds}s..."
+echo
+
+ssh "${ssh_args[@]}" "$target" 'bash -s' -- "$seconds" "$stress_mode" <<'REMOTE'
+set -euo pipefail
+
+seconds="$1"
+stress_mode="$2"
+stress_pids=()
+
+if [[ ! -r /proc/stat ]]; then
+  echo "Для проверки нужен Linux /proc/stat. На удаленной ОС его нет." >&2
+  exit 1
+fi
+
+cleanup() {
+  if (( ${#stress_pids[@]} > 0 )); then
+    kill "${stress_pids[@]}" >/dev/null 2>&1 || true
+    wait "${stress_pids[@]}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+read_cpu() {
+  awk '
+    /^cpu / {
+      total = 0
+      for (i = 2; i <= NF; i++) total += $i
+      print total, $9
+      exit
+    }
+  ' /proc/stat
+}
+
+format_pct() {
+  local x100="$1"
+  printf '%d.%02d%%' "$((x100 / 100))" "$((x100 % 100))"
+}
+
+interpret() {
+  local x100="$1"
+  if (( x100 < 100 )); then
+    echo "Excellent: все отлично, CPU steal почти нет (нормально)."
+  elif (( x100 < 300 )); then
+    echo "Good: все хорошо, CPU steal низкий (так себе только если повторяется в пиках)."
+  elif (( x100 < 500 )); then
+    echo "OK: до 5%, жить можно, но стоит иногда перепроверять (заметно плохо еще не видно)."
+  elif (( x100 < 1000 )); then
+    echo "Bad: заметный CPU contention / вероятный оверселл (плохо)."
+  elif (( x100 < 2000 )); then
+    echo "Very bad: VM регулярно не получает CPU (очень плохо)."
+  elif (( x100 < 3000 )); then
+    echo "Terrible: сильная деградация производительности (ужасно)."
+  elif (( x100 < 5000 )); then
+    echo "Critical: хост-нода сильно перегружена (сервер душат)."
+  elif (( x100 < 7000 )); then
+    echo "Severe: VM большую часть времени CPU-starved (почти неработоспособно)."
+  else
+    echo "Unusable: нормально работать почти невозможно (все пропало)."
+  fi
+}
+
+read_cpu_full() {
+  awk '
+    /^cpu / {
+      total = 0
+      for (i = 2; i <= NF; i++) total += $i
+      idle = $5 + $6
+      print total, idle
+      exit
+    }
+  ' /proc/stat
+}
+
+cpu_idle_x100() {
+  local prev_total prev_idle total idle delta_total delta_idle
+  read -r prev_total prev_idle < <(read_cpu_full)
+  sleep 1
+  read -r total idle < <(read_cpu_full)
+
+  delta_total=$((total - prev_total))
+  delta_idle=$((idle - prev_idle))
+  if (( delta_total <= 0 )); then
+    echo 0
+    return
+  fi
+
+  echo $(((delta_idle * 10000 + delta_total / 2) / delta_total))
+}
+
+start_cpu_load() {
+  local workers="$1"
+  local i
+
+  echo "Нагрузка: запускаю генератор случайных чисел на ${workers} vCPU..."
+  for ((i = 1; i <= workers; i++)); do
+    awk 'BEGIN { srand(); while (1) { x = rand(); y = x * rand(); } }' >/dev/null &
+    stress_pids+=("$!")
+  done
+
+  sleep 2
+}
+
+hostname="$(hostname -f 2>/dev/null || hostname)"
+kernel="$(uname -srmo 2>/dev/null || uname -a)"
+cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo '?')"
+model="$(awk -F: '/model name|Hardware|Processor/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' /proc/cpuinfo 2>/dev/null || true)"
+loadavg="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo '?')"
+virt=""
+if command -v systemd-detect-virt >/dev/null 2>&1; then
+  virt="$(systemd-detect-virt 2>/dev/null || true)"
+fi
+
+echo "Host: $hostname"
+echo "Kernel: $kernel"
+echo "vCPU: $cores"
+if [[ -n "$model" ]]; then
+  echo "CPU: $model"
+fi
+if [[ -n "$virt" ]]; then
+  echo "Virtualization: $virt"
+fi
+echo "Load average: $loadavg"
+echo
+
+if ! [[ "$cores" =~ ^[0-9]+$ ]] || (( cores < 1 )); then
+  cores=1
+fi
+
+case "$stress_mode" in
+  yes)
+    start_cpu_load "$cores"
+    ;;
+  auto)
+    idle_x100="$(cpu_idle_x100)"
+    busy_x100=$((10000 - idle_x100))
+    echo "CPU сейчас: занято $(format_pct "$busy_x100"), простой $(format_pct "$idle_x100")."
+    if (( idle_x100 > 5000 )); then
+      echo "Простоя больше 50%: включаю stress auto."
+      start_cpu_load "$cores"
+    else
+      echo "Простоя 50% или меньше: нагрузка уже есть, дополнительный stress не запускаю."
+    fi
+    echo
+    ;;
+  no)
+    echo "Нагрузка: выключена (--no-stress)."
+    echo
+    ;;
+  *)
+    echo "Неизвестный режим stress: $stress_mode" >&2
+    exit 2
+    ;;
+esac
+
+read -r prev_total prev_steal < <(read_cpu)
+sum_x100=0
+max_x100=0
+count=0
+
+for ((i = 1; i <= seconds; i++)); do
+  sleep 1
+  read -r total steal < <(read_cpu)
+  delta_total=$((total - prev_total))
+  delta_steal=$((steal - prev_steal))
+  prev_total="$total"
+  prev_steal="$steal"
+
+  if (( delta_total <= 0 )); then
+    continue
+  fi
+
+  pct_x100=$(((delta_steal * 10000 + delta_total / 2) / delta_total))
+  sum_x100=$((sum_x100 + pct_x100))
+  if (( pct_x100 > max_x100 )); then
+    max_x100="$pct_x100"
+  fi
+  count=$((count + 1))
+done
+
+if (( count == 0 )); then
+  echo "Не удалось собрать CPU samples." >&2
+  exit 1
+fi
+
+avg_x100=$(((sum_x100 + count / 2) / count))
+
+echo "CPU steal средний: $(format_pct "$avg_x100")"
+echo "CPU steal макс 1s: $(format_pct "$max_x100")"
+echo "Замеров: ${count}s"
+echo
+interpret "$avg_x100"
+echo
+if (( ${#stress_pids[@]} > 0 )); then
+  echo "Нагрузка остановлена. Если steal высокий под такой нагрузкой, это хороший признак CPU contention/оверселла."
+else
+  echo "Совет: для чистого теста под нагрузкой используйте --stress, если auto-режим не включил нагрузку."
+fi
+REMOTE
