@@ -40,6 +40,10 @@ install_file() {
     if mkdir -p "$INSTALL_DIR" 2>/dev/null; then
       :
     elif command -v sudo >/dev/null 2>&1; then
+      echo "Нужен sudo, чтобы создать каталог установки: $INSTALL_DIR"
+      echo "Сейчас macOS/Linux спросит пароль вашего пользователя."
+      echo "Без sudo можно установить так:"
+      echo "curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | INSTALL_DIR=\$HOME/.local/bin bash"
       sudo mkdir -p "$INSTALL_DIR"
     else
       echo "Не удалось создать $INSTALL_DIR и sudo не найден." >&2
@@ -50,6 +54,10 @@ install_file() {
   if [[ -w "$INSTALL_DIR" ]]; then
     install -m 0755 "$src" "$dst"
   elif command -v sudo >/dev/null 2>&1; then
+    echo "Нужен sudo, чтобы установить команду в системный каталог: $dst"
+    echo "Сейчас macOS/Linux спросит пароль вашего пользователя."
+    echo "Без sudo можно установить так:"
+    echo "curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | INSTALL_DIR=\$HOME/.local/bin bash"
     sudo install -m 0755 "$src" "$dst"
   else
     echo "Нет прав на запись в $INSTALL_DIR и sudo не найден." >&2

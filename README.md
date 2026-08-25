@@ -17,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | bas
 Установка в другой каталог:
 
 ```bash
-INSTALL_DIR="$HOME/.local/bin" bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
 ## Использование
