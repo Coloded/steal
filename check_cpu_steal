@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026.09.08.20"
+VERSION="2026.09.08.21"
 REPO_BASE_URL="${CHECK_CPU_STEAL_REPO_BASE_URL:-https://raw.githubusercontent.com/Coloded/steal/main}"
 REPO_COMMIT_API_URL="${CHECK_CPU_STEAL_REPO_COMMIT_API_URL:-https://api.github.com/repos/Coloded/steal/commits/main}"
 lang="en"
+json_mode=0
 
 for arg in "$@"; do
   case "$arg" in
     -ru|--ru)
       lang="ru"
       break
+      ;;
+    -j|--json)
+      json_mode=1
       ;;
   esac
 done
@@ -19,7 +23,7 @@ usage() {
   if [[ "$lang" == "ru" ]]; then
     cat <<'EOF'
 Использование:
-  check_cpu_steal [user@]host [-p port] [-s seconds] [--stress|--no-stress|--stress-auto] [-ru]
+  check_cpu_steal [user@]host [-p port] [-s seconds] [--stress|--no-stress|--stress-auto] [-ru] [-j]
   check_cpu_steal --update [-ru]
   check_cpu_steal --version
 
@@ -34,7 +38,7 @@ EOF
   else
     cat <<'EOF'
 Usage:
-  check_cpu_steal [user@]host [-p port] [-s seconds] [--stress|--no-stress|--stress-auto] [-ru]
+  check_cpu_steal [user@]host [-p port] [-s seconds] [--stress|--no-stress|--stress-auto] [-ru] [-j]
   check_cpu_steal --update [-ru]
   check_cpu_steal --version
 
@@ -56,6 +60,14 @@ say() {
     echo "$ru"
   else
     echo "$en"
+  fi
+}
+
+log() {
+  if (( json_mode )); then
+    echo "$*" >&2
+  else
+    echo "$@"
   fi
 }
 
@@ -171,6 +183,10 @@ while [[ $# -gt 0 ]]; do
       lang="ru"
       shift
       ;;
+    -j|--json)
+      json_mode=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -259,21 +275,28 @@ if [[ -n "$port" ]]; then
 fi
 
 if [[ "$lang" == "ru" ]]; then
-  echo "Подключаюсь к $target..."
-  echo "Меряю CPU steal ${seconds}s..."
+  log "Подключаюсь к $target..."
+  log "Меряю CPU steal ${seconds}s..."
 else
-  echo "Connecting to $target..."
-  echo "Measuring CPU steal for ${seconds}s..."
+  log "Connecting to $target..."
+  log "Measuring CPU steal for ${seconds}s..."
 fi
-echo
+log
 
-ssh "${ssh_args[@]}" "$target" 'bash -s' -- "$seconds" "$stress_mode" "$lang" <<'REMOTE'
+ssh "${ssh_args[@]}" "$target" 'bash -s' -- "$seconds" "$stress_mode" "$lang" "$json_mode" "$target" "$port" "$VERSION" <<'REMOTE'
 set -euo pipefail
 
 seconds="$1"
 stress_mode="$2"
 lang="$3"
+json_mode="$4"
+target="$5"
+port="$6"
+version="$7"
 stress_pids=()
+stress_started=0
+idle_x100=""
+busy_x100=""
 
 say() {
   local en="$1"
@@ -282,6 +305,14 @@ say() {
     echo "$ru"
   else
     echo "$en"
+  fi
+}
+
+out() {
+  if (( json_mode )); then
+    echo "$*" >&2
+  else
+    echo "$@"
   fi
 }
 
@@ -310,6 +341,44 @@ read_cpu() {
 format_pct() {
   local x100="$1"
   printf '%d.%02d%%' "$((x100 / 100))" "$((x100 % 100))"
+}
+
+format_json_pct() {
+  local x100="$1"
+  printf '%d.%02d' "$((x100 / 100))" "$((x100 % 100))"
+}
+
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+grade_level() {
+  local x100="$1"
+  if (( x100 < 100 )); then
+    echo "Excellent"
+  elif (( x100 < 300 )); then
+    echo "Good"
+  elif (( x100 < 500 )); then
+    echo "OK"
+  elif (( x100 < 1000 )); then
+    echo "Bad"
+  elif (( x100 < 2000 )); then
+    echo "Very bad"
+  elif (( x100 < 3000 )); then
+    echo "Terrible"
+  elif (( x100 < 5000 )); then
+    echo "Critical"
+  elif (( x100 < 7000 )); then
+    echo "Severe"
+  else
+    echo "Unusable"
+  fi
 }
 
 interpret() {
@@ -387,11 +456,12 @@ start_cpu_load() {
   local workers="$1"
   local i
 
-  say "Load: starting random-number CPU generator on ${workers} vCPU..." "Нагрузка: запускаю генератор случайных чисел на ${workers} vCPU..."
+  out "$(say "Load: starting random-number CPU generator on ${workers} vCPU..." "Нагрузка: запускаю генератор случайных чисел на ${workers} vCPU...")"
   for ((i = 1; i <= workers; i++)); do
     awk 'BEGIN { srand(); while (1) { x = rand(); y = x * rand(); } }' >/dev/null &
     stress_pids+=("$!")
   done
+  stress_started=1
 
   sleep 2
 }
@@ -406,17 +476,19 @@ if command -v systemd-detect-virt >/dev/null 2>&1; then
   virt="$(systemd-detect-virt 2>/dev/null || true)"
 fi
 
-echo "Host: $hostname"
-echo "Kernel: $kernel"
-echo "vCPU: $cores"
-if [[ -n "$model" ]]; then
-  echo "CPU: $model"
+if (( ! json_mode )); then
+  echo "Host: $hostname"
+  echo "Kernel: $kernel"
+  echo "vCPU: $cores"
+  if [[ -n "$model" ]]; then
+    echo "CPU: $model"
+  fi
+  if [[ -n "$virt" ]]; then
+    echo "Virtualization: $virt"
+  fi
+  echo "Load average: $loadavg"
+  echo
 fi
-if [[ -n "$virt" ]]; then
-  echo "Virtualization: $virt"
-fi
-echo "Load average: $loadavg"
-echo
 
 if ! [[ "$cores" =~ ^[0-9]+$ ]] || (( cores < 1 )); then
   cores=1
@@ -430,21 +502,21 @@ case "$stress_mode" in
     idle_x100="$(cpu_idle_x100)"
     busy_x100=$((10000 - idle_x100))
     if [[ "$lang" == "ru" ]]; then
-      echo "CPU сейчас: занято $(format_pct "$busy_x100"), простой $(format_pct "$idle_x100")."
+      out "CPU сейчас: занято $(format_pct "$busy_x100"), простой $(format_pct "$idle_x100")."
     else
-      echo "CPU now: busy $(format_pct "$busy_x100"), idle $(format_pct "$idle_x100")."
+      out "CPU now: busy $(format_pct "$busy_x100"), idle $(format_pct "$idle_x100")."
     fi
     if (( idle_x100 > 5000 )); then
-      say "Idle is above 50%: enabling stress auto." "Простоя больше 50%: включаю stress auto."
+      out "$(say "Idle is above 50%: enabling stress auto." "Простоя больше 50%: включаю stress auto.")"
       start_cpu_load "$cores"
     else
-      say "Idle is 50% or lower: load already exists, not starting extra stress." "Простоя 50% или меньше: нагрузка уже есть, дополнительный stress не запускаю."
+      out "$(say "Idle is 50% or lower: load already exists, not starting extra stress." "Простоя 50% или меньше: нагрузка уже есть, дополнительный stress не запускаю.")"
     fi
-    echo
+    out
     ;;
   no)
-    say "Load: disabled (--no-stress)." "Нагрузка: выключена (--no-stress)."
-    echo
+    out "$(say "Load: disabled (--no-stress)." "Нагрузка: выключена (--no-stress).")"
+    out
     ;;
   *)
     say "Unknown stress mode: $stress_mode" "Неизвестный режим stress: $stress_mode" >&2
@@ -484,7 +556,41 @@ fi
 
 avg_x100=$(((sum_x100 + count / 2) / count))
 
-if [[ "$lang" == "ru" ]]; then
+if (( json_mode )); then
+  interpretation="$(interpret "$avg_x100")"
+  grade="$(grade_level "$avg_x100")"
+  if (( stress_started )); then
+    stress_started_json="true"
+  else
+    stress_started_json="false"
+  fi
+  printf '{'
+  printf '"version":"%s",' "$(json_escape "$version")"
+  printf '"target":"%s",' "$(json_escape "$target")"
+  printf '"port":"%s",' "$(json_escape "$port")"
+  printf '"host":"%s",' "$(json_escape "$hostname")"
+  printf '"kernel":"%s",' "$(json_escape "$kernel")"
+  printf '"vcpus":%s,' "$cores"
+  printf '"cpu_model":"%s",' "$(json_escape "$model")"
+  printf '"virtualization":"%s",' "$(json_escape "$virt")"
+  printf '"load_average":"%s",' "$(json_escape "$loadavg")"
+  if [[ -n "$busy_x100" ]]; then
+    printf '"cpu_busy_percent":%s,' "$(format_json_pct "$busy_x100")"
+    printf '"cpu_idle_percent":%s,' "$(format_json_pct "$idle_x100")"
+  else
+    printf '"cpu_busy_percent":null,'
+    printf '"cpu_idle_percent":null,'
+  fi
+  printf '"stress_mode":"%s",' "$(json_escape "$stress_mode")"
+  printf '"stress_started":%s,' "$stress_started_json"
+  printf '"samples":%s,' "$count"
+  printf '"seconds_requested":%s,' "$seconds"
+  printf '"steal_average_percent":%s,' "$(format_json_pct "$avg_x100")"
+  printf '"steal_max_1s_percent":%s,' "$(format_json_pct "$max_x100")"
+  printf '"grade":"%s",' "$(json_escape "$grade")"
+  printf '"interpretation":"%s"' "$(json_escape "$interpretation")"
+  printf '}\n'
+elif [[ "$lang" == "ru" ]]; then
   echo "CPU steal средний: $(format_pct "$avg_x100")"
   echo "CPU steal макс 1s: $(format_pct "$max_x100")"
   echo "Замеров: ${count}s"
@@ -493,12 +599,15 @@ else
   echo "CPU steal max 1s: $(format_pct "$max_x100")"
   echo "Samples: ${count}s"
 fi
-echo
-interpret "$avg_x100"
-echo
-if (( ${#stress_pids[@]} > 0 )); then
-  say "Load stopped. High steal under this load is a strong sign of CPU contention/overselling." "Нагрузка остановлена. Если steal высокий под такой нагрузкой, это хороший признак CPU contention/оверселла."
-else
-  say "Tip: use --stress for a clean under-load test if auto mode did not start load." "Совет: для чистого теста под нагрузкой используйте --stress, если auto-режим не включил нагрузку."
+
+if (( ! json_mode )); then
+  echo
+  interpret "$avg_x100"
+  echo
+  if (( ${#stress_pids[@]} > 0 )); then
+    say "Load stopped. High steal under this load is a strong sign of CPU contention/overselling." "Нагрузка остановлена. Если steal высокий под такой нагрузкой, это хороший признак CPU contention/оверселла."
+  else
+    say "Tip: use --stress for a clean under-load test if auto mode did not start load." "Совет: для чистого теста под нагрузкой используйте --stress, если auto-режим не включил нагрузку."
+  fi
 fi
 REMOTE

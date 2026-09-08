@@ -70,6 +70,7 @@ check_cpu_steal root@server.example.com -p 2222 -s 60
 check_cpu_steal root@server.example.com --stress
 check_cpu_steal root@server.example.com --no-stress
 check_cpu_steal root@server.example.com -ru
+check_cpu_steal root@server.example.com -j
 check_cpu_steal --version
 check_cpu_steal --update
 ```
@@ -77,6 +78,28 @@ check_cpu_steal --update
 By default `--stress-auto` is enabled: if CPU idle is above 50%, the script starts a random-number CPU generator on all detected vCPUs, measures steal, and stops the load before exit.
 
 Use `-ru` or `--ru` for Russian output.
+Use `-j` or `--json` for script-friendly JSON output.
+
+JSON example:
+
+```bash
+check_cpu_steal root@server.example.com -s 30 -j
+```
+
+Example fields:
+
+```json
+{
+  "host": "server.example.com",
+  "vcpus": 4,
+  "stress_mode": "auto",
+  "stress_started": true,
+  "samples": 30,
+  "steal_average_percent": 0.53,
+  "steal_max_1s_percent": 1.25,
+  "grade": "Excellent"
+}
+```
 
 ## Update
 
