@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="2026.09.08.18"
+VERSION="2026.09.08.19"
 REPO_BASE_URL="${CHECK_CPU_STEAL_REPO_BASE_URL:-https://raw.githubusercontent.com/Coloded/steal/main}"
 REPO_COMMIT_API_URL="${CHECK_CPU_STEAL_REPO_COMMIT_API_URL:-https://api.github.com/repos/Coloded/steal/commits/main}"
 lang="en"
@@ -303,7 +303,7 @@ read_cpu() {
     /^cpu / {
       total = 0
       for (i = 2; i <= NF; i++) total += $i
-      print total, $9
+      printf "%.0f %.0f\n", total, $9
       exit
     }
   ' /proc/stat
@@ -365,7 +365,7 @@ read_cpu_full() {
       total = 0
       for (i = 2; i <= NF; i++) total += $i
       idle = $5 + $6
-      print total, idle
+      printf "%.0f %.0f\n", total, idle
       exit
     }
   ' /proc/stat
