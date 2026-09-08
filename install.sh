@@ -174,6 +174,14 @@ install_file() {
   local src="$1"
   local dst="$2"
 
+  if [[ -e "$INSTALL_DIR" && ! -d "$INSTALL_DIR" ]]; then
+    say "Install path exists but is not a directory: $INSTALL_DIR" "Путь установки существует, но это не каталог: $INSTALL_DIR" >&2
+    say "Falling back to personal install without sudo: $HOME/.local/bin" "Перехожу на установку только себе без sudo: $HOME/.local/bin" >&2
+    INSTALL_DIR="$HOME/.local/bin"
+    TARGET="${INSTALL_DIR}/${BIN_NAME}"
+    dst="$TARGET"
+  fi
+
   if [[ "$INSTALL_DIR" != "/usr/local/bin" && ! -d "$INSTALL_DIR" ]]; then
     if mkdir -p "$INSTALL_DIR" 2>/dev/null || [[ -d "$INSTALL_DIR" ]]; then
       :
@@ -190,12 +198,18 @@ install_file() {
   fi
 
   if [[ -w "$INSTALL_DIR" ]]; then
-    install -m 0755 "$src" "$dst"
+    install -m 0755 "$src" "$dst" || {
+      say "Install failed for: $dst" "Установка не удалась для: $dst" >&2
+      exit 1
+    }
   else
     if command -v sudo >/dev/null 2>&1; then
       say "sudo is needed to install into: $dst" "Нужен sudo, чтобы установить в: $dst"
       SUDO_USED=1
-      sudo install -m 0755 "$src" "$dst"
+      sudo install -m 0755 "$src" "$dst" || {
+        say "Install failed for: $dst" "Установка не удалась для: $dst" >&2
+        exit 1
+      }
     else
       say "No write permission and sudo was not found: $INSTALL_DIR" "Нет прав на запись и sudo не найден: $INSTALL_DIR" >&2
       exit 1

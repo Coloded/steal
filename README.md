@@ -25,6 +25,7 @@ Press Enter or answer `n` for a personal install without password:
 ```
 
 Answer `y` to install for all users into `/usr/local/bin`; that path may ask for your sudo password. If `~/.local/bin` is not in `PATH`, the installer prints the line to add to your shell profile.
+If `/usr/local/bin` exists but is not a directory, the installer falls back to personal install without sudo.
 
 The public install URL is permanent and always stays on `refs/heads/main/install.sh`. Internally, the installer asks GitHub API for the current `main` commit SHA and downloads the script by that SHA, so GitHub raw CDN cache cannot install an older `check_cpu_steal`.
 
