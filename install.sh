@@ -174,12 +174,14 @@ install_file() {
   local src="$1"
   local dst="$2"
 
-  if [[ ! -d "$INSTALL_DIR" ]]; then
-    if ! mkdir -p "$INSTALL_DIR" 2>/dev/null; then
+  if [[ "$INSTALL_DIR" != "/usr/local/bin" && ! -d "$INSTALL_DIR" ]]; then
+    if mkdir -p "$INSTALL_DIR" 2>/dev/null || [[ -d "$INSTALL_DIR" ]]; then
+      :
+    else
       if command -v sudo >/dev/null 2>&1; then
         say "sudo is needed to create install directory: $INSTALL_DIR" "Нужен sudo, чтобы создать каталог установки: $INSTALL_DIR"
         SUDO_USED=1
-        sudo mkdir -p "$INSTALL_DIR"
+        sudo mkdir -p "$INSTALL_DIR" || [[ -d "$INSTALL_DIR" ]]
       else
         say "Could not create install directory and sudo was not found: $INSTALL_DIR" "Не удалось создать каталог установки и sudo не найден: $INSTALL_DIR" >&2
         exit 1
