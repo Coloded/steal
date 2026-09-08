@@ -9,7 +9,7 @@ The script uses normal `ssh`: keys, `ssh-agent`, `~/.ssh/config`, and password l
 Debian/Ubuntu/Linux and macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | bash
+curl -fsSL https://github.com/Coloded/steal/raw/refs/heads/main/install.sh | bash
 ```
 
 The installer asks where to install:
@@ -26,18 +26,18 @@ Press Enter or answer `n` for a personal install without password:
 
 Answer `y` to install for all users into `/usr/local/bin`; that path may ask for your sudo password. If `~/.local/bin` is not in `PATH`, the installer prints the line to add to your shell profile.
 
-The public install URL is permanent and always stays on `/main/install.sh`. Internally, the installer asks GitHub API for the current `main` commit SHA and downloads the script by that SHA, so GitHub raw CDN cache cannot install an older `check_cpu_steal`.
+The public install URL is permanent and always stays on `refs/heads/main/install.sh`. Internally, the installer asks GitHub API for the current `main` commit SHA and downloads the script by that SHA, so GitHub raw CDN cache cannot install an older `check_cpu_steal`.
 
 Install into another user-writable directory:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | INSTALL_DIR="$HOME/.local/bin" bash
+curl -fsSL https://github.com/Coloded/steal/raw/refs/heads/main/install.sh | INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
 Russian installer output:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Coloded/steal/main/install.sh | bash -s -- -ru
+curl -fsSL https://github.com/Coloded/steal/raw/refs/heads/main/install.sh | bash -s -- -ru
 ```
 
 ## Usage
