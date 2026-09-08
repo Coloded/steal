@@ -24,10 +24,31 @@ Press Enter or answer `n` for a personal install without password:
 ~/.local/bin/check_cpu_steal
 ```
 
-Answer `y` to install for all users into `/usr/local/bin`; that path may ask for your sudo password. If `~/.local/bin` is not in `PATH`, the installer prints the line to add to your shell profile.
+Answer `y` to install for all users into the detected system directory; that path may ask for your sudo password. If the personal directory is not in `PATH`, the installer prints the line to add to your shell profile.
 If `/usr/local/bin` exists but is not a directory, the installer falls back to personal install without sudo.
 
 The public install command is permanent: it asks GitHub API for the current `main` commit SHA and downloads `install.sh` by that SHA, so GitHub raw CDN cache cannot install an older file.
+
+## Install Directories
+
+The installer detects the local Unix-like system and chooses install directories like this:
+
+```text
+System                    Personal install           All-users install
+macOS                     ~/.local/bin               /opt/homebrew/bin, /usr/local/bin, /opt/local/bin
+Debian                    ~/.local/bin               /usr/local/bin
+Ubuntu                    ~/.local/bin               /usr/local/bin
+Fedora                    ~/.local/bin               /usr/local/bin
+RHEL/CentOS/Rocky/Alma    ~/.local/bin               /usr/local/bin
+Arch/Manjaro              ~/.local/bin               /usr/local/bin
+openSUSE/SLES             ~/.local/bin               /usr/local/bin
+Alpine                    ~/.local/bin               /usr/local/bin
+FreeBSD/OpenBSD/NetBSD    ~/bin                      /usr/local/bin
+Solaris/illumos           ~/bin                      /opt/local/bin, /usr/local/bin
+AIX/HP-UX                 ~/bin                      /usr/local/bin, /opt/freeware/bin, /opt/local/bin
+```
+
+For all-users install, the first existing directory from the list is used. Personal install never uses sudo.
 
 Install into another user-writable directory:
 

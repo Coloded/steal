@@ -16,6 +16,9 @@ BIN_NAME="${BIN_NAME:-check_cpu_steal}"
 TARGET="${INSTALL_DIR}/${BIN_NAME}"
 LOCAL_TARGET="${LOCAL_TARGET:-$(pwd)/${BIN_NAME}}"
 SUDO_USED=0
+OS_NAME=""
+PERSONAL_INSTALL_DIR=""
+SYSTEM_INSTALL_DIR=""
 lang="en"
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
 SCRIPT_DIR=""
@@ -63,6 +66,95 @@ say() {
   fi
 }
 
+detect_os_name() {
+  local kernel os_id os_like
+
+  kernel="$(uname -s 2>/dev/null || echo unknown)"
+  case "$kernel" in
+    Darwin)
+      echo "macOS"
+      return
+      ;;
+    FreeBSD|OpenBSD|NetBSD|DragonFly)
+      echo "$kernel"
+      return
+      ;;
+    SunOS)
+      echo "Solaris/illumos"
+      return
+      ;;
+    AIX|HP-UX)
+      echo "$kernel"
+      return
+      ;;
+    Linux)
+      os_id=""
+      os_like=""
+      if [[ -r /etc/os-release ]]; then
+        os_id="$(awk -F= '/^ID=/ {gsub(/"/, "", $2); print $2; exit}' /etc/os-release)"
+        os_like="$(awk -F= '/^ID_LIKE=/ {gsub(/"/, "", $2); print $2; exit}' /etc/os-release)"
+      fi
+      case " $os_id $os_like " in
+        *" ubuntu "*) echo "Ubuntu" ;;
+        *" debian "*) echo "Debian" ;;
+        *" fedora "*) echo "Fedora" ;;
+        *" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*) echo "RHEL/CentOS/Rocky/AlmaLinux" ;;
+        *" arch "*) echo "Arch/Manjaro" ;;
+        *" suse "*|*" opensuse "*) echo "openSUSE/SLES" ;;
+        *" alpine "*) echo "Alpine" ;;
+        *) echo "Linux" ;;
+      esac
+      return
+      ;;
+    *)
+      echo "$kernel"
+      ;;
+  esac
+}
+
+first_existing_dir() {
+  local fallback="" dir
+
+  for dir in "$@"; do
+    if [[ -z "$fallback" ]]; then
+      fallback="$dir"
+    fi
+    if [[ -d "$dir" ]]; then
+      printf '%s\n' "$dir"
+      return
+    fi
+  done
+
+  printf '%s\n' "$fallback"
+}
+
+detect_install_dirs() {
+  OS_NAME="$(detect_os_name)"
+
+  case "$OS_NAME" in
+    macOS)
+      PERSONAL_INSTALL_DIR="$HOME/.local/bin"
+      SYSTEM_INSTALL_DIR="$(first_existing_dir /opt/homebrew/bin /usr/local/bin /opt/local/bin)"
+      ;;
+    FreeBSD|OpenBSD|NetBSD|DragonFly)
+      PERSONAL_INSTALL_DIR="$HOME/bin"
+      SYSTEM_INSTALL_DIR="$(first_existing_dir /usr/local/bin)"
+      ;;
+    Solaris/illumos)
+      PERSONAL_INSTALL_DIR="$HOME/bin"
+      SYSTEM_INSTALL_DIR="$(first_existing_dir /opt/local/bin /usr/local/bin)"
+      ;;
+    AIX|HP-UX)
+      PERSONAL_INSTALL_DIR="$HOME/bin"
+      SYSTEM_INSTALL_DIR="$(first_existing_dir /usr/local/bin /opt/freeware/bin /opt/local/bin)"
+      ;;
+    *)
+      PERSONAL_INSTALL_DIR="$HOME/.local/bin"
+      SYSTEM_INSTALL_DIR="$(first_existing_dir /usr/local/bin)"
+      ;;
+  esac
+}
+
 read_answer() {
   local prompt_en="$1"
   local prompt_ru="$2"
@@ -96,18 +188,19 @@ choose_install_scope() {
     return
   fi
 
-  say "Install for all users? This installs to /usr/local/bin and may ask for sudo password." "Установить для всех пользователей? Это установка в /usr/local/bin и может спросить пароль sudo."
-  say "Press Enter for personal install without password: $HOME/.local/bin" "Нажмите Enter для установки только себе без пароля: $HOME/.local/bin"
+  say "Detected OS: $OS_NAME" "Определена ОС: $OS_NAME"
+  say "Install for all users? This installs to $SYSTEM_INSTALL_DIR and may ask for sudo password." "Установить для всех пользователей? Это установка в $SYSTEM_INSTALL_DIR и может спросить пароль sudo."
+  say "Press Enter for personal install without password: $PERSONAL_INSTALL_DIR" "Нажмите Enter для установки только себе без пароля: $PERSONAL_INSTALL_DIR"
   answer="$(read_answer "Install for all users with sudo? [y/N]: " "Установить для всех пользователей с sudo? [y/N]: ")"
 
   case "$answer" in
     y|Y|yes|YES|Yes|д|Д|да|Да|ДА)
-      INSTALL_DIR="/usr/local/bin"
+      INSTALL_DIR="$SYSTEM_INSTALL_DIR"
       TARGET="${INSTALL_DIR}/${BIN_NAME}"
       say "Selected: all users. macOS/Linux may ask for your password." "Выбрано: для всех пользователей. macOS/Linux может спросить пароль."
       ;;
     *)
-      INSTALL_DIR="$HOME/.local/bin"
+      INSTALL_DIR="$PERSONAL_INSTALL_DIR"
       TARGET="${INSTALL_DIR}/${BIN_NAME}"
       say "Selected: personal install, no sudo." "Выбрано: установка только себе, без sudo."
       ;;
@@ -176,8 +269,8 @@ install_file() {
 
   if [[ -e "$INSTALL_DIR" && ! -d "$INSTALL_DIR" ]]; then
     say "Install path exists but is not a directory: $INSTALL_DIR" "Путь установки существует, но это не каталог: $INSTALL_DIR" >&2
-    say "Falling back to personal install without sudo: $HOME/.local/bin" "Перехожу на установку только себе без sudo: $HOME/.local/bin" >&2
-    INSTALL_DIR="$HOME/.local/bin"
+    say "Falling back to personal install without sudo: $PERSONAL_INSTALL_DIR" "Перехожу на установку только себе без sudo: $PERSONAL_INSTALL_DIR" >&2
+    INSTALL_DIR="$PERSONAL_INSTALL_DIR"
     TARGET="${INSTALL_DIR}/${BIN_NAME}"
     dst="$TARGET"
   fi
@@ -233,6 +326,8 @@ print_path_hint() {
   say "Add this line to your shell profile, then reopen the terminal:" "Добавьте эту строку в профиль shell, потом откройте терминал заново:"
   if [[ "$INSTALL_DIR" == "$HOME/.local/bin" ]]; then
     echo "export PATH=\"\$HOME/.local/bin:\$PATH\""
+  elif [[ "$INSTALL_DIR" == "$HOME/bin" ]]; then
+    echo "export PATH=\"\$HOME/bin:\$PATH\""
   else
     echo "export PATH=\"$INSTALL_DIR:\$PATH\""
   fi
@@ -252,10 +347,10 @@ print_shadow_hint() {
 }
 
 case "$(uname -s)" in
-  Linux|Darwin)
+  Linux|Darwin|FreeBSD|OpenBSD|NetBSD|DragonFly|SunOS|AIX|HP-UX)
     ;;
   *)
-    say "Supported systems: Debian/Ubuntu/Linux and macOS." "Поддерживаются Debian/Ubuntu/Linux и macOS." >&2
+    say "Supported systems: macOS, Linux, BSD, Solaris/illumos, AIX, and HP-UX." "Поддерживаются macOS, Linux, BSD, Solaris/illumos, AIX и HP-UX." >&2
     exit 1
     ;;
 esac
@@ -264,6 +359,7 @@ need_cmd install
 need_cmd ssh
 need_cmd awk
 
+detect_install_dirs
 choose_install_scope
 
 tmp="$(mktemp)"
